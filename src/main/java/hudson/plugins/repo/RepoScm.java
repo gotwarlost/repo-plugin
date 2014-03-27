@@ -326,7 +326,7 @@ public class RepoScm extends SCM implements Serializable {
 			repoDir = workspace;
 		}
 
-		if (!checkoutCode(launcher, repoDir, expandedManifestBranch,
+		if (!checkoutCode(launcher, repoDir, null, expandedManifestBranch,
 			listener.getLogger())) {
 			// Some error occurred, try a build now so it gets logged.
 			return new PollingResult(myBaseline, myBaseline,
@@ -364,10 +364,31 @@ public class RepoScm extends SCM implements Serializable {
 		}
 
 		EnvVars env = build.getEnvironment(listener);
-		final String expandedBranch = getManifestBranchExpanded(
-				env, build.getProject());
-		if (!checkoutCode(launcher, repoDir, expandedBranch,
-				listener.getLogger())) {
+
+		final RevisionParameterAction parameter =
+				build.getAction(RevisionParameterAction.class);
+
+		if (parameter != null) {
+			listener.getLogger().println("Using upstream manifest revision: "
+					+ parameter.getManifestRevision() + " with manifest:");
+			listener.getLogger().println(parameter.getManifest());
+			if (localManifest != null) {
+				listener.getLogger().println("WARNING: local manifest "
+						+ "will be ignored");
+			}
+		}
+
+		final String expandedBranch = parameter != null
+				? parameter.getManifestRevision()
+				: getManifestBranchExpanded(env, build.getProject());
+
+		final String overrideManifestFile = parameter != null
+				? writeTemporaryManifestFile(parameter.getManifest(), repoDir,
+					listener)
+				: null;
+
+		if (!checkoutCode(launcher, repoDir, overrideManifestFile,
+				expandedBranch, listener.getLogger())) {
 			return false;
 		}
 		final String manifest =
@@ -387,6 +408,26 @@ public class RepoScm extends SCM implements Serializable {
 				launcher, repoDir);
 		build.addAction(new TagAction(build));
 		return true;
+	}
+
+	private String writeTemporaryManifestFile(final String manifestContents,
+		final FilePath workspace, final BuildListener listener)
+	throws IOException, InterruptedException {
+
+		if (workspace == null) {
+			listener.getLogger().println("Unable to create override "
+					+ "manifest, no workspace present for file operations!");
+			return null;
+		}
+
+		final FilePath dir = workspace.child(".repo").child("manifests");
+		dir.mkdirs();
+
+		final String manifestName = "override-" + System.currentTimeMillis()
+				+ ".xml";
+		final FilePath manifestPath = dir.child(manifestName);
+		manifestPath.write(manifestContents, null);
+		return manifestName;
 	}
 
 	private int doSync(final Launcher launcher, final FilePath workspace,
@@ -414,7 +455,8 @@ public class RepoScm extends SCM implements Serializable {
 	}
 
 	private boolean checkoutCode(final Launcher launcher,
-			final FilePath workspace, final String expandedManifestBranch,
+			final FilePath workspace, final String overrideManifestFile,
+			final String expandedManifestBranch,
 			final OutputStream logger)
 			throws IOException, InterruptedException {
 		final List<String> commands = new ArrayList<String>(4);
@@ -429,10 +471,14 @@ public class RepoScm extends SCM implements Serializable {
 			commands.add("-b");
 			commands.add(expandedManifestBranch);
 		}
-		if (manifestFile != null) {
+		if (overrideManifestFile != null) {
+			commands.add("-m");
+			commands.add(overrideManifestFile);
+		} else if (manifestFile != null) {
 			commands.add("-m");
 			commands.add(manifestFile);
 		}
+
 		if (mirrorDir != null) {
 			commands.add("--reference=" + mirrorDir);
 		}
@@ -454,7 +500,7 @@ public class RepoScm extends SCM implements Serializable {
 			FilePath rdir = workspace.child(".repo");
 			FilePath lm = rdir.child("local_manifest.xml");
 			lm.delete();
-			if (localManifest != null) {
+			if (localManifest != null && overrideManifestFile == null) {
 				if (localManifest.startsWith("<?xml")) {
 					lm.write(localManifest, null);
 				} else {

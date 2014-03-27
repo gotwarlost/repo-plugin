@@ -52,6 +52,8 @@ import org.xml.sax.InputSource;
 @SuppressWarnings("serial")
 public class RevisionState extends SCMRevisionState implements Serializable {
 
+	private static final String MANIFEST_REVISION_PATH = ".repo/manifests.git";
+
 	private final String manifest;
 	private final Map<String, ProjectState> projects =
 			new TreeMap<String, ProjectState>();
@@ -115,7 +117,7 @@ public class RevisionState extends SCMRevisionState implements Serializable {
 				}
 			}
 
-            final String manifestP = ".repo/manifests.git";
+            final String manifestP = MANIFEST_REVISION_PATH;
             projects.put(manifestP, ProjectState.constructCachedInstance(
                         manifestP, manifestP, manifestRevision));
             if (logger != null) {
@@ -179,6 +181,13 @@ public class RevisionState extends SCMRevisionState implements Serializable {
 		return project == null ? null : project.getRevision();
 	}
 
+	/**
+	 * returns the manifest revision for this state.
+	 */
+	public String getManifestRevision() {
+		ProjectState project = projects.get(MANIFEST_REVISION_PATH);
+		return project == null ? null : project.getRevision();
+	}
 	/**
 	 * Calculate what has changed from a specified previous repository state.
 	 *
